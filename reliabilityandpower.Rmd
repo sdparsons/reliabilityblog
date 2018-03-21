@@ -1,0 +1,194 @@
+---
+title: "Impact of reliability on power"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+
+```
+
+```{r}
+# install and run all necessary packages
+library("tidyverse")
+
+devtools::install_github("cttobin/ggthemr")
+library("ggthemr")
+
+```
+
+
+
+
+## Reliability and the maximum observable correlation effect size
+
+Following a reformulation of the spearman attentuation formula (see Hedge et al. 2017), we can calculate for any reliability estimates for measures A and B the maximum observable correlation. Figure 1 assumes a "true" correlation effect size of 1 to plot the maximum values. 
+
+$r(_{measure A, measure B}) = r(_{true A, true B}) \sqrt{ reliability(measure A)reliability(measureB)}$
+
+
+
+
+```{r}
+# create data frame with reliability combinations
+dat <- data.frame(a = rep(c(.1, .2, .3, .4, .5, .6, .7, .8 ,.9, 1), each = 10),
+           b = rep(c(.1, .2, .3, .4, .5, .6, .7, .8 ,.9, 1), times = 10))
+
+# calculate maximum observable correlation based on the reformulation of the spearman attenuation formula
+# sqrt(reliability_measure_a * reliability_measure_b)
+dat <- dat %>%
+  mutate(c = sqrt(a * b)) 
+
+dat$a <- as.factor(dat$a)
+dat$b <- as.factor(dat$b)
+
+# set the themes throughout the figures
+ggthemr_reset()
+
+ggthemr("earth", type="outer", layout="scientific")
+
+# plot the figure
+dat %>%
+  ggplot(aes(x = a, y = c, group = b, colour = b)) +
+  geom_point(aes(colour = b)) +
+  stat_smooth(aes(colour = b), se = F) +
+  xlab("Reliability A") +
+  ylab("Max Observable Correlation") +
+  labs(colour = "Reliability B") +
+  theme(text = element_text(size = 14)) +
+  guides(colour = guide_legend(reverse = T)) +
+  scale_color_brewer(palette = "Spectral")
+#  ggtitle("maximum observable correlations between two\n measures of known reliability")
+
+
+```
+
+
+## True to Observed effect sizes
+
+Using the above formula, we can create a dataset to cover a range of effect sizes (.1-.9 in .1 increments). The following plots indicate the observed effect at varying levels of measure A and measure B reliability for "true" correlations of .3, .5, and .7. It is readily apparent that the figures show the same pattern, scaled by the "true" effect size
+
+
+
+```{r}
+library(pwr)
+
+dat2 <- data.frame(truer = rep(c(.1, .2, .3, .4, .5, .6, .7, .8 ,.9), each = 81),
+                   reliability_a = rep(c(.1, .2, .3, .4, .5, .6, .7, .8 ,.9), each = 9, times = 9),
+                   reliability_b = rep(c(.1, .2, .3, .4, .5, .6, .7, .8 ,.9), times = 81))
+
+dat2 <- dat2 %>%
+  mutate(observabler = truer * sqrt(reliability_a * reliability_b))
+
+
+# one column for N needed for true cor
+# one column for N needed for observable r
+
+dat2$Ntrue <- 0
+dat2$Nobs <- 0
+
+temp <- NULL
+temp2 <- NULL
+
+for(i in 1:729) {
+  
+  temp <- pwr.r.test(r = dat2[i,"truer"], n = NULL, sig.level = .05, power = .8)
+  dat2[i, "Ntrue"] <- temp$n
+  
+  temp2 <- pwr.r.test(r = dat2[i,"observabler"], n = NULL, sig.level = .05, power = .8)
+  dat2[i, "Nobs"] <- temp2$n
+  
+}
+
+temp3 <- NULL
+temp4 <- NULL
+dat2$Power <- 0
+dat2$AltPower <- 0
+
+for(i in 1:729) {
+  temp3 <- pwr.r.test(r = dat2[i,"truer"], n = dat2[i,"Ntrue"], sig.level = .05, power = NULL)
+  dat2[i, "Power"] <- temp3$power
+  
+  temp4 <- pwr.r.test(r = dat2[i,"observabler"], n = dat2[i,"Ntrue"], sig.level = .05, power = NULL)
+  dat2[i, "AltPower"] <- temp4$power
+}
+
+# works better with factors
+dat2$reliability_a <- as.factor(dat2$reliability_a)
+dat2$reliability_b <- as.factor(dat2$reliability_b)
+
+dat2$reliability_a <- sub("^[0]+", "", dat2$reliability_a)
+dat2$reliability_b <- sub("^[0]+", "", dat2$reliability_b)
+
+
+dat2[dat2[["truer"]] == .3 |dat2[["truer"]] == .5 |dat2[["truer"]] == .7 ,] %>%
+  ggplot(aes(x = reliability_a, y = observabler, group = reliability_b)) +
+  geom_point(aes(colour = reliability_b)) +
+  geom_smooth(aes(colour = reliability_b), se = F) +
+  guides(colour = guide_legend(reverse = T)) +
+  xlab("Reliability A") +
+  ylab("Observed Correlation") +
+  labs(colour = "Reliability B") +
+  ylim(0, 1) +
+  theme(text = element_text(size = 14)) +
+  scale_color_brewer(palette = "Spectral") +
+  facet_wrap(~truer)
+
+
+
+```
+
+
+## Power
+
+We might then ask about the impact that this has on power. If we power our study to find a correlation of .5 at 80% power for example, we will likely 'actually' have les statistical power than expected. Even a correlation of 1 would be observed as .9 if both measures have a .9 reliability. The following code takes true effects of .3, .5, and .7 at the full range of measurement A and B reliabilities. The required sample size for 80% power is calculated. The figure plots the observed power to detect the observed effect given the "true" effect and the sample size required to detect that effect.
+
+To take an example from the figure. Let's say you power to an effect of .5, but your tasks have even an excellent reliability of .9 each. The power you will achieve for the same sample size is .7. This may not be a large difference, but it does increase the rewuired sample from 28 to 36, if 80% power is to be achieved. 
+
+```{r}
+
+
+dat2[dat2[["truer"]] == .3 |dat2[["truer"]] == .5 |dat2[["truer"]] == .7 ,] %>%
+  ggplot(aes(x = reliability_a, y = AltPower, group = reliability_b)) +
+  geom_point(aes(colour = reliability_b)) +
+  geom_smooth(aes(colour = reliability_b), se = F) +
+  guides(colour = guide_legend(reverse = T)) +
+  xlab("Reliability A") +
+  ylab("Power") +
+  labs(colour = "Reliability B") +
+  scale_color_brewer(palette = "Spectral") +
+  facet_wrap(~truer)
+
+
+```
+
+
+and the same for the required sample sizes (this is where things get scary). the horizontal line indicates the required sample size for the true effect (i.e. assuming both measure reliabilities = 1).
+Also note that the legend is the same as before. 
+
+```{r}
+# dat2[dat2[["truer"]] == .3 |dat2[["truer"]] == .5 |dat2[["truer"]] == .7 ,] %>%
+#   ggplot(aes(x = reliability_a, y = Ntrue, group = reliability_b)) +
+#   geom_point(aes(colour = reliability_b)) +
+#   geom_smooth(aes(colour = reliability_b), se = F) +
+#   guides(colour = guide_legend(reverse = T)) +
+#   coord_cartesian(ylim = c(0,300)) +
+#   facet_wrap(~truer)
+
+dat2[dat2[["truer"]] == .3 |dat2[["truer"]] == .5 |dat2[["truer"]] == .7 ,] %>%
+  ggplot(aes(x = reliability_a, y = Nobs, group = reliability_b)) +
+  geom_point(aes(colour = reliability_b)) +
+  geom_smooth(aes(colour = reliability_b), se = F) +
+  guides(colour = guide_legend(reverse = T)) +
+  coord_cartesian(ylim = c(0,300)) +
+  geom_hline(aes(yintercept = Ntrue)) +
+  xlab("Reliability A") +
+  ylab("Sample size") +
+  labs(colour = "Reliability B") +
+  scale_color_brewer(palette = "Spectral") +
+  facet_wrap(~truer)
+
+```
+
+
